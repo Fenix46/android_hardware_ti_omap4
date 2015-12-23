@@ -760,8 +760,6 @@ OMX_ERRORTYPE PROXY_AllocateBuffer(OMX_IN OMX_HANDLETYPE hComponent,
 	//Round Off the size to allocate and map to next page boundary.
 	OMX_U32 nSize = (nSizeBytes + LINUX_PAGE_SIZE - 1) & ~(LINUX_PAGE_SIZE - 1);
 	OMX_U8* pMemptr = NULL;
-	OMX_CONFIG_RECTTYPE tParamRect;
-	OMX_PARAM_PORTDEFINITIONTYPE tParamPortDef;
 
 	PROXY_require((hComp->pComponentPrivate != NULL),
 	    OMX_ErrorBadParameter, NULL);
@@ -957,11 +955,7 @@ static OMX_ERRORTYPE PROXY_UseBuffer(OMX_IN OMX_HANDLETYPE hComponent,
 	OMX_COMPONENTTYPE *hComp = (OMX_COMPONENTTYPE *) hComponent;
 	OMX_BOOL bSlotFound = OMX_FALSE;
 	OMX_PTR pAuxBuf0 = pBuffer;
-	OMX_PTR pMappedMetaDataBuffer = NULL;
 	OMX_TI_PARAM_METADATABUFFERINFO tMetaDataBuffer;
-	OMX_U32 nBufferHeight = 0;
-	OMX_CONFIG_RECTTYPE tParamRect;
-	OMX_PARAM_PORTDEFINITIONTYPE tParamPortDef;
 	MEMPLUGIN_BUFFER_PROPERTIES metadataBuffer_prop;
 	MEMPLUGIN_BUFFER_PARAMS metadataBuffer_params;
 	MEMPLUGIN_ERRORTYPE eMemError = MEMPLUGIN_ERROR_NONE;
@@ -1033,6 +1027,13 @@ static OMX_ERRORTYPE PROXY_UseBuffer(OMX_IN OMX_HANDLETYPE hComponent,
 		}
 	}
 #endif
+
+	if(pCompPrv->proxyPortBuffers[nPortIndex].proxyBufferType == FileDescriptorsArray)
+        {
+		pAuxBuf0 = (OMX_U8 *)(((int *)pBuffer)[0]);
+		((OMX_TI_PLATFORMPRIVATE *) pBufferHeader->pPlatformPrivate)->
+			pAuxBuf1 = (OMX_U8 *)(((int *)pBuffer)[1]);
+	}
 
 	DOMX_DEBUG("Preparing buffer to Remote Core...");
 	pBufferHeader->pBuffer = pBuffer;
@@ -1202,7 +1203,7 @@ OMX_ERRORTYPE PROXY_FreeBuffer(OMX_IN OMX_HANDLETYPE hComponent,
 	    "Could not find the mapped address in component private buffer list");
 
 	pBuffer = (OMX_U32)pBufferHdr->pBuffer;
-    pAuxBuf0 = (OMX_PTR) pBuffer;
+        pAuxBuf0 = (OMX_PTR) pBuffer;
 
 #ifdef ENABLE_GRALLOC_BUFFERS
 	if (pCompPrv->proxyPortBuffers[nPortIndex].proxyBufferType == GrallocPointers)
@@ -1211,7 +1212,6 @@ OMX_ERRORTYPE PROXY_FreeBuffer(OMX_IN OMX_HANDLETYPE hComponent,
 		pAuxBuf0 = (OMX_U8 *)(((IMG_native_handle_t*)pBuffer)->fd[0]);
 	}
 #endif
-
 	if (pCompPrv->proxyPortBuffers[nPortIndex].proxyBufferType == BufferDescriptorVirtual2D)
 	{
 		pAuxBuf0 = (OMX_U8 *)(((OMX_TI_BUFFERDESCRIPTOR_TYPE*)pBuffer)->pBuf[0]);
@@ -1226,7 +1226,7 @@ OMX_ERRORTYPE PROXY_FreeBuffer(OMX_IN OMX_HANDLETYPE hComponent,
 	eRPCError =
 	    RPC_FreeBuffer(pCompPrv->hRemoteComp, nPortIndex,
 	    pCompPrv->tBufList[count].pBufHeaderRemote, (OMX_U32) pAuxBuf0,
-	    &eCompReturn);
+	    pCompPrv->proxyPortBuffers[nPortIndex].proxyBufferType, &eCompReturn);
 
 	if (eRPCError != RPC_OMX_ErrorNone)
 		eTmpRPCError = eRPCError;
@@ -1370,6 +1370,13 @@ OMX_ERRORTYPE __PROXY_SetParameter(OMX_IN OMX_HANDLETYPE hComponent,
 		}
 #endif
 #ifndef DOMX_TUNA
+		case OMX_TI_IndexUseDmaBuffers:
+		{
+                        ptBufDescParam = (OMX_TI_PARAM_USEBUFFERDESCRIPTOR *) pParamStruct;
+			pCompPrv->proxyPortBuffers[ptBufDescParam->nPortIndex].proxyBufferType = FileDescriptorsArray;
+			pCompPrv->proxyPortBuffers[ptBufDescParam->nPortIndex].IsBuffer2D = ptBufDescParam->bEnabled;
+			break;
+		}
 		case OMX_TI_IndexUseBufferDescriptor:
 		     ptBufDescParam = (OMX_TI_PARAM_USEBUFFERDESCRIPTOR *) pParamStruct;
 		     if(ptBufDescParam->bEnabled == OMX_TRUE)
@@ -2114,7 +2121,7 @@ OMX_ERRORTYPE PROXY_ComponentDeInit(OMX_HANDLETYPE hComponent)
 	    RPC_OMX_ErrorNone;
 	PROXY_COMPONENT_PRIVATE *pCompPrv;
 	OMX_COMPONENTTYPE *hComp = (OMX_COMPONENTTYPE *) hComponent;
-	OMX_U32 count = 0, nStride = 0, nPortIndex = 0;
+	OMX_U32 count = 0, nPortIndex = 0;
 	OMX_PTR pMetaDataBuffer = NULL;
 	MEMPLUGIN_BUFFER_PROPERTIES delBuffer_prop;
 	MEMPLUGIN_BUFFER_PARAMS delBuffer_params;
