@@ -198,7 +198,8 @@ extern "C"
 		GrallocPointers,   /*Used when buffer pointers come from Gralloc allocations */
 		IONPointers,       /*Used when buffer pointers come from ION allocations */
 		EncoderMetadataPointers,		/*Used when buffer pointers come from Stagefright in camcorder usecase */
-		BufferDescriptorVirtual2D          /*Virtual unpacked buffers passed via OMX_TI_BUFFERDESCRIPTOR_TYPE */
+		BufferDescriptorVirtual2D,          /*Virtual unpacked buffers passed via OMX_TI_BUFFERDESCRIPTOR_TYPE */
+                FileDescriptorsArray	          /*We pass an array of integers representing file descriptors */
 	} PROXY_BUFFER_TYPE;
 
 /*===============================================================*/

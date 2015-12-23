@@ -1027,12 +1027,9 @@ RPC_OMX_ERRORTYPE RPC_UseBuffer(OMX_HANDLETYPE hRPCCtx,
 	OMX_S32 status = 0;
 	RPC_OMX_CONTEXT *hCtx = hRPCCtx;
 	OMX_HANDLETYPE hComp = hCtx->hRemoteHandle;
-	OMX_TI_PLATFORMPRIVATE *pPlatformPrivate = NULL;
 	OMX_BUFFERHEADERTYPE *pBufferHdr = *ppBufferHdr;
 	struct omx_packet *pOmxPacket = NULL;
 	RPC_OMX_MAP_INFO_TYPE eMapInfo = RPC_OMX_MAP_INFO_NONE;
-	OMX_PTR pMetaDataBuffer = NULL;
-	OMX_U32 a =32;
 
 	DOMX_ENTER("");
 
@@ -1093,7 +1090,6 @@ RPC_OMX_ERRORTYPE RPC_UseBuffer(OMX_HANDLETYPE hRPCCtx,
 		pRetData = ((struct omx_packet *) pRetPacket)->data;
 		RPC_GETFIELDVALUE(pRetData, nPos, *pBufHeaderRemote, OMX_U32);
 		//save platform private before overwriting
-		pPlatformPrivate = (*ppBufferHdr)->pPlatformPrivate;
 
 		/*Copying each field of the header separately due to padding issues in
 		   the buffer header structure */
@@ -1171,7 +1167,7 @@ RPC_OMX_ERRORTYPE RPC_UseBuffer(OMX_HANDLETYPE hRPCCtx,
 /* ===========================================================================*/
 RPC_OMX_ERRORTYPE RPC_FreeBuffer(OMX_HANDLETYPE hRPCCtx,
     OMX_IN OMX_U32 nPortIndex, OMX_IN OMX_U32 BufHdrRemote, OMX_U32 pBuffer,
-    OMX_ERRORTYPE * eCompReturn)
+    PROXY_BUFFER_TYPE eBufferType, OMX_ERRORTYPE * eCompReturn)
 {
 	RPC_OMX_ERRORTYPE eRPCError = RPC_OMX_ErrorNone;
 	TIMM_OSAL_ERRORTYPE eError = TIMM_OSAL_ERR_NONE;
@@ -1183,6 +1179,9 @@ RPC_OMX_ERRORTYPE RPC_FreeBuffer(OMX_HANDLETYPE hRPCCtx,
 	RPC_OMX_CONTEXT *hCtx = hRPCCtx;
 	OMX_HANDLETYPE hComp = hCtx->hRemoteHandle;
 	struct omx_packet *pOmxPacket = NULL;
+        RPC_OMX_MAP_INFO_TYPE eMapInfo = RPC_OMX_MAP_INFO_NONE;
+	OMX_U8 *pAuxBuf0;
+	OMX_U8 *pAuxBuf1;
 
 	DOMX_ENTER("");
 
@@ -1193,9 +1192,22 @@ RPC_OMX_ERRORTYPE RPC_FreeBuffer(OMX_HANDLETYPE hRPCCtx,
 	/*Offset is the location of the buffer pointer from the start of the data packet */
 	nOffset =  sizeof(RPC_OMX_MAP_INFO_TYPE) + sizeof(OMX_U32) +
                    sizeof(OMX_HANDLETYPE) + sizeof(OMX_U32) + sizeof(OMX_U32);
-	/*No buffer mapping required */
-	RPC_SETFIELDVALUE(pData, nPos, RPC_OMX_MAP_INFO_ONE_BUF,
-	    RPC_OMX_MAP_INFO_TYPE);
+
+	if (eBufferType == FileDescriptorsArray)
+	{
+		int* fd_array = pBuffer;
+		pAuxBuf0 = (OMX_U8 *)(fd_array[0]);
+		pAuxBuf1 = (OMX_U8 *)(fd_array[1]);
+		eMapInfo = RPC_OMX_MAP_INFO_TWO_BUF;
+	}
+	else
+	{
+		pAuxBuf0 = pBuffer;
+		pAuxBuf1 = NULL;
+		eMapInfo = RPC_OMX_MAP_INFO_ONE_BUF;
+	}
+
+	RPC_SETFIELDVALUE(pData, nPos, eMapInfo, RPC_OMX_MAP_INFO_TYPE);
 	RPC_SETFIELDVALUE(pData, nPos, nOffset, OMX_U32);
 
 	RPC_SETFIELDVALUE(pData, nPos, hComp, OMX_HANDLETYPE);
@@ -1203,7 +1215,11 @@ RPC_OMX_ERRORTYPE RPC_FreeBuffer(OMX_HANDLETYPE hRPCCtx,
 	RPC_SETFIELDVALUE(pData, nPos, BufHdrRemote, OMX_U32);
 	/* Buffer is being sent separately only to catch NULL buffer errors
 	   in PA mode */
-	RPC_SETFIELDVALUE(pData, nPos, pBuffer, OMX_U32);
+	RPC_SETFIELDVALUE(pData, nPos, pAuxBuf0, OMX_U32);
+	if (pAuxBuf1 != NULL)
+	{
+		RPC_SETFIELDVALUE(pData, nPos, pAuxBuf1, OMX_U32);
+	}
 
 	RPC_sendPacket_sync(hCtx, pPacket, nPacketSize, nFxnIdx, pRetPacket,
 	    nSize);
@@ -1245,7 +1261,6 @@ RPC_OMX_ERRORTYPE RPC_EmptyThisBuffer(OMX_HANDLETYPE hRPCCtx,
 	OMX_S32 status = 0;
 	RPC_OMX_CONTEXT *hCtx = hRPCCtx;
 	OMX_HANDLETYPE hComp = hCtx->hRemoteHandle;
-	OMX_U8 *pAuxBuf1 = NULL;
 	struct omx_packet *pOmxPacket = NULL;
 	RPC_OMX_MAP_INFO_TYPE eMapInfo = RPC_OMX_MAP_INFO_NONE;
 #ifdef RPC_SYNC_MODE
@@ -1260,7 +1275,6 @@ RPC_OMX_ERRORTYPE RPC_EmptyThisBuffer(OMX_HANDLETYPE hRPCCtx,
 
 	if(bMapBuffer == OMX_TRUE)
 	{
-		pAuxBuf1 = ((OMX_TI_PLATFORMPRIVATE *) pBufferHdr->pPlatformPrivate)->pAuxBuf1;
 		/*Buffer mapping required */
 		if (((OMX_TI_PLATFORMPRIVATE *) pBufferHdr->pPlatformPrivate)->pAuxBuf1 == NULL)
 			eMapInfo = RPC_OMX_MAP_INFO_ONE_BUF;
@@ -1352,7 +1366,6 @@ RPC_OMX_ERRORTYPE RPC_FillThisBuffer(OMX_HANDLETYPE hRPCCtx,
 	OMX_S32 status = 0;
 	RPC_OMX_CONTEXT *hCtx = hRPCCtx;
 	OMX_HANDLETYPE hComp = hCtx->hRemoteHandle;
-	OMX_U8 *pAuxBuf1 = NULL;
 	struct omx_packet *pOmxPacket = NULL;
 #ifdef RPC_SYNC_MODE
 	TIMM_OSAL_PTR pPacket = NULL, pRetPacket = NULL, pData = NULL;
@@ -1451,7 +1464,7 @@ RPC_OMX_ERRORTYPE RPC_ComponentTunnelRequest(OMX_HANDLETYPE hRPCCtx,
         OMX_HANDLETYPE     hTunneledComp   = hTunneledCtx->hRemoteHandle;
 	RPC_OMX_FXN_IDX_TYPE nFxnIdx;
 	struct omx_packet *pOmxPacket = NULL;
-	OMX_U32 nPos = 0, nSize = 0, nOffset = 0;
+	OMX_U32 nPos = 0, nSize = 0;
 	OMX_S32 status = 0;
 #ifdef RPC_SYNC_MODE
 	TIMM_OSAL_PTR pPacket = NULL, pRetPacket = NULL, pData = NULL;
