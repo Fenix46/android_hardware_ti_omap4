@@ -1560,12 +1560,13 @@ NewIONLinuxMemArea(IMG_UINT32 ui32Bytes, IMG_UINT32 ui32AreaFlags,
         if(asAllocData[i].fmt == TILER_PIXEL_FMT_PAGE)
         {
 			/* 1D DMM Buffers */
-			struct scatterlist *sg, *sglist;
+			struct scatterlist *sg;
+                        struct sg_table *sglist;
 			IMG_UINT32 ui32Num1dPages;
 
 			asAllocData[i].handle = ion_alloc (gpsIONClient,
 				ui32Bytes,
-				PAGE_SIZE, (1 << OMAP_ION_HEAP_SYSTEM));
+				PAGE_SIZE, (1 << OMAP_ION_HEAP_SYSTEM), 0);
 
 			if (asAllocData[i].handle == NULL)
 			{
@@ -1574,7 +1575,7 @@ NewIONLinuxMemArea(IMG_UINT32 ui32Bytes, IMG_UINT32 ui32AreaFlags,
 				goto err_free;
 			}
 
-			sglist = ion_map_dma (gpsIONClient, asAllocData[i].handle);
+			sglist = ion_sg_table (gpsIONClient, asAllocData[i].handle);
 			if (sglist == NULL)
 			{
 				PVR_DPF((PVR_DBG_ERROR, "%s: Failed to compute pages",
@@ -1591,7 +1592,7 @@ NewIONLinuxMemArea(IMG_UINT32 ui32Bytes, IMG_UINT32 ui32AreaFlags,
 				goto err_free;
 			}
 
-			for_each_sg (sglist, sg, ui32Num1dPages, j)
+			for_each_sg (sglist->sgl, sg, ui32Num1dPages, j)
 			{
 				pu32PageAddrs[i][j] = sg_phys (sg);
 			}
