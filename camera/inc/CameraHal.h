@@ -356,6 +356,7 @@ typedef struct _CameraBuffer {
     struct ion_handle * ion_handle;
     int ion_fd;
     int fd;
+    int dma_buf_fd;
     size_t size;
     int index;
 

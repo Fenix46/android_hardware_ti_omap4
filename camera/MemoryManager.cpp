@@ -87,6 +87,7 @@ CameraBuffer* MemoryManager::allocateBufferList(int width, int height, const cha
         struct ion_handle *handle;
         int mmap_fd;
         size_t stride;
+        int dmaBufFd = -1;
 
         ///1D buffers
         for (int i = 0; i < numBufs; i++) {
@@ -116,12 +117,22 @@ CameraBuffer* MemoryManager::allocateBufferList(int width, int height, const cha
                 goto error;
             }
 
+            ret = ion_share(mIonFd, handle, &dmaBufFd);
+            if (ret < 0 || dmaBufFd < 0) {
+                CAMHAL_LOGDB("ION carveout buffer share failed[%d]", ret);
+                munmap(data, size);
+                close(mmap_fd);
+                ion_free(mIonFd, handle);
+                goto error;
+            }
+
             buffers[i].type = CAMERA_BUFFER_ION;
             buffers[i].opaque = data;
             buffers[i].mapped = data;
             buffers[i].ion_handle = handle;
             buffers[i].ion_fd = mIonFd;
             buffers[i].fd = mmap_fd;
+            buffers[i].dma_buf_fd = dmaBufFd;
             buffers[i].size = size;
             buffers[i].format = CameraHal::getPixelFormatConstant(format);
 
@@ -193,6 +204,7 @@ int MemoryManager::freeBufferList(CameraBuffer *buffers)
             {
             munmap(buffers[i].opaque, buffers[i].size);
             close(buffers[i].fd);
+            close(buffers[i].dma_buf_fd);
             ion_free(mIonFd, buffers[i].ion_handle);
             }
         else
