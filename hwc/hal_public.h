@@ -29,6 +29,7 @@
  */
 
 #include <hardware/gralloc.h>
+#include <hardware/hwcomposer_defs.h>
 
 #define ALIGN(x,a)	(((x) + (a) - 1L) & ~((a) - 1L))
 #define HW_ALIGN	32
@@ -40,6 +41,18 @@
  * Future OEM video formats might be three sub-allocs (Y, U, V planes).
  */
 #define MAX_SUB_ALLOCS 3
+
+
+/* JB MR1 enables dual display support in Android framework. We continue to
+ * use the FB HAL architecture to enable such a support, and for this we need
+ * FB1 usage identifier in gralloc.
+ */
+#ifndef GRALLOC_HARDWARE_FB1
+#define GRALLOC_HARDWARE_FB1 "fb1"
+#endif
+
+/* Number of displays identifier from hwcomposer defs */
+#define NUM_FB_DEVICES HWC_NUM_DISPLAY_TYPES
 
 typedef struct
 {
