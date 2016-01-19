@@ -198,6 +198,7 @@ private:
     status_t v4lIoctl(int, int, void*);
     status_t v4lInitMmap(int& count, int width, int height);
     status_t v4lInitUsrPtr(int&);
+    status_t v4lInitDmaBuf(int& count, int width, int height);
     status_t v4lStartStreaming();
     status_t v4lStopStreaming(int nBufferCount);
     status_t v4lSetFormat(int, int, uint32_t);
@@ -213,6 +214,8 @@ private:
     int mCaptureBufferCountQueueable;
     CameraBuffer *mPreviewBufs[NB_BUFFER];
     android::KeyedVector<CameraBuffer *, int> mCaptureBufs;
+    CameraBuffer *mCameraBuffers;
+    android::sp<MemoryManager> mMemoryManager;
 
     android::CameraParameters mParams;
 

@@ -191,6 +191,32 @@ status_t V4LCameraAdapter::v4lInitUsrPtr(int& count) {
     return ret;
 }
 
+status_t V4LCameraAdapter::v4lInitDmaBuf(int& count, int width, int height) {
+    status_t ret = NO_ERROR;
+    int bytes = width * height * 2;
+
+    mVideoInfo->rb.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    mVideoInfo->rb.memory = V4L2_MEMORY_DMABUF;
+    mVideoInfo->rb.count = count;
+
+    ret = v4lIoctl(mCameraHandle, VIDIOC_REQBUFS, &mVideoInfo->rb);
+    if (ret < 0) {
+        CAMHAL_LOGEB("VIDIOC_REQBUFS failed for DMABUF: %s", strerror(errno));
+        return ret;
+    }
+    count = mVideoInfo->rb.count;
+
+    CAMHAL_LOGEB("Allocate CameraBufferlist [%d][%d][%d]\n", count, width, height);
+
+    mCameraBuffers = mMemoryManager->allocateBufferList(0, 0, (const char *) android::CameraParameters::PIXEL_FORMAT_YUV422I, bytes, count);
+    if( NULL == mCameraBuffers ) {
+        CAMHAL_LOGEA("Couldn't allocate camera buffers using memory manager");
+        ret = -NO_MEMORY;
+    }
+
+    return ret;
+}
+
 status_t V4LCameraAdapter::v4lStartStreaming () {
     status_t ret = NO_ERROR;
     enum v4l2_buf_type bufType;
@@ -321,7 +347,7 @@ status_t V4LCameraAdapter::restartPreview ()
         goto EXIT;
     }
 
-    ret = v4lInitMmap(mPreviewBufferCount, width, height);
+    ret = v4lInitDmaBuf(mPreviewBufferCount, width, height);
     if (ret < 0) {
         CAMHAL_LOGEB("v4lInitMmap Failed: %s", strerror(errno));
         goto EXIT;
@@ -332,7 +358,9 @@ status_t V4LCameraAdapter::restartPreview ()
         v4l2_buffer buf;
         buf.index = i;
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        buf.memory = V4L2_MEMORY_MMAP;
+        buf.memory = V4L2_MEMORY_DMABUF;
+        buf.m.fd = mCameraBuffers[i].dma_buf_fd;
+        buf.length = mCameraBuffers[i].size
 
         ret = v4lIoctl(mCameraHandle, VIDIOC_QBUF, &buf);
         if (ret < 0) {
@@ -401,6 +429,15 @@ status_t V4LCameraAdapter::initialize(CameraProperties::Properties* caps)
         CAMHAL_LOGEA("Error while adapter initialization: Capture device does not support streaming i/o");
         ret = BAD_VALUE;
         goto EXIT;
+    }
+
+    if(!mMemoryManager.get()) {
+        /// Create Memory Manager
+        mMemoryManager = new MemoryManager();
+        if( ( NULL == mMemoryManager.get() ) || ( mMemoryManager->initialize() != NO_ERROR)) {
+            CAMHAL_LOGEA("Unable to create or initialize MemoryManager");
+            goto EXIT;
+        }
     }
 
     // Initialize flags
@@ -472,7 +509,10 @@ status_t V4LCameraAdapter::fillThisBuffer(CameraBuffer *frameBuf, CameraFrame::F
         v4l2_buffer buf;
         buf.index = idx;
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        buf.memory = V4L2_MEMORY_MMAP;
+        buf.memory = V4L2_MEMORY_DMABUF;
+        buf.m.fd = mCameraBuffers[idx].dma_buf_fd;
+        buf.length = mCameraBuffers[idx].size;
+
         CAMHAL_LOGD("Will return buffer to V4L with id=%d", idx);
         ret = v4lIoctl(mCameraHandle, VIDIOC_QBUF, &buf);
         if (ret < 0) {
@@ -642,7 +682,7 @@ status_t V4LCameraAdapter::UseBuffersPreview(CameraBuffer *bufArr, int num)
     }
 
     mParams.getPreviewSize(&width, &height);
-    ret = v4lInitMmap(num, width, height);
+    ret = v4lInitDmaBuf(num, width, height);
 
     mOutBuffers.clear();
 
@@ -868,7 +908,7 @@ status_t V4LCameraAdapter::startPreview()
 
         mVideoInfo->buf.index = i;
         mVideoInfo->buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        mVideoInfo->buf.memory = V4L2_MEMORY_MMAP;
+        mVideoInfo->buf.memory = V4L2_MEMORY_DMABUF;
 
         ret = v4lIoctl (mCameraHandle, VIDIOC_QUERYBUF, &mVideoInfo->buf);
         if (ret < 0) {
@@ -878,7 +918,9 @@ status_t V4LCameraAdapter::startPreview()
 
         buf.index = i;
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        buf.memory = V4L2_MEMORY_MMAP;
+        buf.memory = V4L2_MEMORY_DMABUF;
+        buf.m.fd = mCameraBuffers[i].dma_buf_fd;
+        buf.length = mCameraBuffers[i].size;
 
         ret = v4lIoctl(mCameraHandle, VIDIOC_QBUF, &buf);
         if (ret < 0) {
@@ -919,6 +961,9 @@ status_t V4LCameraAdapter::stopPreview()
 
     LOG_FUNCTION_NAME;
 
+    mPreviewThread->requestExitAndWait();
+    mPreviewThread.clear();
+
     android::AutoMutex lock(mLock);
 
     if(!mPreviewing) {
@@ -936,15 +981,13 @@ status_t V4LCameraAdapter::stopPreview()
         CAMHAL_LOGEB("StopStreaming: FAILED: %s", strerror(errno));
     }
 
+    mMemoryManager->freeBufferList(mCameraBuffers);
+
     nQueued = 0;
     nDequeued = 0;
     mFramesWithEncoder = 0;
 
     mLock.unlock();
-
-    mPreviewThread->requestExitAndWait();
-    mPreviewThread.clear();
-
 
     LOG_FUNCTION_NAME_EXIT;
     return ret;
@@ -984,7 +1027,7 @@ char * V4LCameraAdapter::GetFrame(int &index, int &filledLen)
 
     v4l2_buffer buf;
     buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buf.memory = V4L2_MEMORY_MMAP;
+    buf.memory = V4L2_MEMORY_DMABUF;
 
     /* DQ */
     // Some V4L drivers, notably uvc, protect each incoming call with
@@ -1006,18 +1049,23 @@ char * V4LCameraAdapter::GetFrame(int &index, int &filledLen)
         return NULL;
     }
 
-    index = buf.index;
-    filledLen = buf.bytesused;
-
-    android::sp<MediaBuffer>& inBuffer = mInBuffers.editItemAt(index);
-    {
-        android::AutoMutex bufferLock(inBuffer->getLock());
-        inBuffer->setTimestamp(systemTime(SYSTEM_TIME_MONOTONIC));
-        inBuffer->filledLen = buf.bytesused;
+    index = -1;
+    for (int i = 0; i < NB_BUFFER; i ++) {
+        if (buf.m.fd == mCameraBuffers[i].dma_buf_fd) {
+            index = i;
+            break;
+        }
     }
+    if (index == -1) {
+        CAMHAL_LOGEB("un-identified fd\n");
+        return NULL;
+    }
+
+    mCameraBuffers[index].actual_size = buf.bytesused;
+
     debugShowFPS();
     LOG_FUNCTION_NAME_EXIT;
-    return (char *)mVideoInfo->mem[index];
+    return (char *)(&mCameraBuffers[index]);
 }
 
 
@@ -1180,6 +1228,8 @@ V4LCameraAdapter::V4LCameraAdapter(size_t sensor_index, CameraHal* hal)
     property_get("camera.v4l.skipframes", value, "1");
     mSkipFramesCount = atoi(value);
 
+    mMemoryManager = NULL;
+
     LOG_FUNCTION_NAME_EXIT;
 }
 
@@ -1200,6 +1250,9 @@ V4LCameraAdapter::~V4LCameraAdapter()
 
     mInBuffers.clear();
     mOutBuffers.clear();
+
+    /* Free the memory manager */
+    mMemoryManager.clear();
 
     LOG_FUNCTION_NAME_EXIT;
 }
@@ -1429,7 +1482,9 @@ status_t V4LCameraAdapter::returnBufferToV4L(int id) {
     v4l2_buffer buf;
     buf.index = id;
     buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buf.memory = V4L2_MEMORY_MMAP;
+    buf.memory = V4L2_MEMORY_DMABUF;
+    buf.m.fd = mCameraBuffers[id].dma_buf_fd;
+    buf.length = mCameraBuffers[id].size;
 
     ret = v4lIoctl(mCameraHandle, VIDIOC_QBUF, &buf);
     if (ret < 0) {
