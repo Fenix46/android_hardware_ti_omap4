@@ -55,7 +55,7 @@ namespace Camera {
 
 //Proto Types
 static void convertYUV422i_yuyvTouyvy(uint8_t *src, uint8_t *dest, size_t size );
-static void convertYUV422ToNV12Tiler(unsigned char *src, unsigned char *dest, int width, int height );
+static void convertYUV422ToNV12Tiler(unsigned char *src, android_ycbcr *dest, int width, int height );
 static void convertYUV422ToNV12(unsigned char *src, unsigned char *dest, int width, int height );
 
 android::Mutex gV4LAdapterLock;
@@ -1278,12 +1278,13 @@ static void convertYUV422i_yuyvTouyvy(uint8_t *src, uint8_t *dest, size_t size )
     LOG_FUNCTION_NAME_EXIT;
 }
 
-static void convertYUV422ToNV12Tiler(unsigned char *src, unsigned char *dest, int width, int height ) {
+static void convertYUV422ToNV12Tiler(unsigned char *src, android_ycbcr *ycbcr, int width, int height ) {
     //convert YUV422I to YUV420 NV12 format and copies directly to preview buffers (Tiler memory).
-    int stride = 4096;
     unsigned char *bf = src;
-    unsigned char *dst_y = dest;
-    unsigned char *dst_uv = dest + ( height * stride);
+    unsigned char *dst_y = (unsigned char*)ycbcr->y;
+    unsigned char *dst_uv = (unsigned char*)ycbcr->cr; /* TBD: use bUVCbCrOrdering to decide cb vs cr */
+    int ystride = ycbcr->ystride;
+    int uvstride = ycbcr->cstride;
 #ifdef PPM_PER_FRAME_CONVERSION
     static int frameCount = 0;
     static nsecs_t ppm_diff = 0;
@@ -1299,7 +1300,7 @@ static void convertYUV422ToNV12Tiler(unsigned char *src, unsigned char *dest, in
                 dst_y++;
                 bf = bf + 2;
             }
-            dst_y += (stride - width);
+            dst_y += (ystride - width);
         }
 
         bf = src;
@@ -1311,7 +1312,7 @@ static void convertYUV422ToNV12Tiler(unsigned char *src, unsigned char *dest, in
                 bf = bf + 2;
             }
             bf = bf + width*2;
-            dst_uv = dst_uv + (stride - width);
+            dst_uv = dst_uv + (uvstride - width);
         }
     } else {
         //neon conversion
@@ -1341,9 +1342,9 @@ static void convertYUV422ToNV12Tiler(unsigned char *src, unsigned char *dest, in
                 : [src_stride] "r" (width), [skip] "r" (skip)
                 : "cc", "memory", "q0", "q1", "q2", "d0", "d1", "d2", "d3"
             );
-            dst_y = dst_y + (stride - width);
+            dst_y = dst_y + (ystride - width);
             if (skip == 0) {
-                dst_uv = dst_uv + (stride - width);
+                dst_uv = dst_uv + (uvstride - width);
             }
         } //end of for()
     }
@@ -1558,7 +1559,7 @@ int V4LCameraAdapter::previewThread()
 
         CameraBuffer *buffer = mPreviewBufs[index];
         if (mPixelFormat == V4L2_PIX_FMT_YUYV) {
-            convertYUV422ToNV12Tiler(reinterpret_cast<unsigned char*>(fp), reinterpret_cast<unsigned char*>(buffer->mapped), width, height);
+                 convertYUV422ToNV12Tiler(reinterpret_cast<unsigned char*>(fp), &(buffer->ycbcr), width, height);
         }
         CAMHAL_LOGVB("##...index= %d.;camera buffer= 0x%x; mapped= 0x%x.",index, buffer, buffer->mapped);
 
